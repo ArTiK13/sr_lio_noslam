@@ -16,7 +16,7 @@
 #include "parameters.h"
 
 optimizeSummary lioOptimization::buildPlaneResiduals(const icpOptions &cur_icp_options, const voxelHashMap &voxel_map_temp, std::vector<point3D> &keypoints, 
-    std::vector<planeParam> &plane_residuals, cloudFrame *p_frame, double &loss_sum)
+    std::vector<planeParam> &plane_residuals, cloudFrame *p_frame, double &loss_sum, bool use_local_map)
 {
     const short nb_voxels_visited = p_frame->frame_id < cur_icp_options.init_num_frames ? 2 : cur_icp_options.voxel_neighborhood;
     const int kMinNumNeighbors = cur_icp_options.min_number_neighbors;
@@ -70,10 +70,18 @@ optimizeSummary lioOptimization::buildPlaneResiduals(const icpOptions &cur_icp_o
         auto &raw_point = keypoint.raw_point;
 
         std::vector<voxel> voxels;
-        auto vector_neighbors = searchNeighbors(voxel_map_temp, keypoint.point,
+        std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>> vector_neighbors;
+        
+        // Use local map for odometry-only mode, otherwise use voxel map
+        if (use_local_map || local_map_points.size() > 0) {
+            vector_neighbors = searchNeighborsLocal(keypoint.point, cur_icp_options.max_number_neighbors, 
+                                                     cur_icp_options.size_voxel_map * (nb_voxels_visited + 1));
+        } else {
+            vector_neighbors = searchNeighbors(voxel_map_temp, keypoint.point,
                                                  nb_voxels_visited, cur_icp_options.size_voxel_map,
                                                  cur_icp_options.max_number_neighbors, kThresholdCapacity,
                                                  cur_icp_options.estimate_normal_from_neighborhood ? nullptr : &voxels);
+        }
 
         if (vector_neighbors.size() < kMinNumNeighbors)
             continue;
@@ -150,7 +158,9 @@ optimizeSummary lioOptimization::updateIEKF(const icpOptions &cur_icp_options, c
 
         double loss_old = 0.0;
 
-        summary = buildPlaneResiduals(cur_icp_options, voxel_map_temp, keypoints, plane_residuals, p_frame, loss_old);
+        // Use local map for odometry-only mode
+        bool use_local_map = !use_global_map;
+        summary = buildPlaneResiduals(cur_icp_options, voxel_map_temp, keypoints, plane_residuals, p_frame, loss_old, use_local_map);
 
         if (summary.success == false)
             return summary;

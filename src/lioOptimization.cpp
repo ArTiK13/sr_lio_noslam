@@ -1,4 +1,5 @@
 #include "lioOptimization.h"
+#include <algorithm>  // For std::sort
 
 cloudFrame::cloudFrame(std::vector<point3D> &point_frame_, state *p_state_)
 {
@@ -266,6 +267,65 @@ size_t lioOptimization::mapSize(const voxelHashMap &map)
         map_size += (itr_voxel_map.second).NumPoints();
     }
     return map_size;
+}
+
+// Local map methods for odometry-only mode
+void lioOptimization::buildLocalMap()
+{
+    local_map_points.clear();
+    
+    // Get recent frames for local map
+    int num_frames = std::min(local_map_frame_count, (int)all_cloud_frame.size());
+    
+    for (int i = all_cloud_frame.size() - num_frames; i < all_cloud_frame.size(); i++)
+    {
+        if (i < 0) continue;
+        
+        cloudFrame* frame = all_cloud_frame[i];
+        if (frame == nullptr || frame == all_cloud_frame.back()) continue;
+        
+        // Add points from this frame to local map
+        for (const auto &point : frame->point_frame)
+        {
+            local_map_points.push_back(point.point);
+        }
+    }
+}
+
+void lioOptimization::clearLocalMap()
+{
+    local_map_points.clear();
+    std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>>().swap(local_map_points);
+}
+
+std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>> lioOptimization::searchNeighborsLocal(const Eigen::Vector3d &point,
+    int max_num_neighbors, double max_distance)
+{
+    std::vector<std::pair<double, Eigen::Vector3d>> neighbor_candidates;
+    
+    // Search through local map points
+    for (const auto &local_point : local_map_points)
+    {
+        double distance = (local_point - point).norm();
+        if (distance < max_distance)
+        {
+            neighbor_candidates.push_back(std::make_pair(distance, local_point));
+        }
+    }
+    
+    // Sort by distance
+    std::sort(neighbor_candidates.begin(), neighbor_candidates.end(),
+              [](const auto &a, const auto &b) { return a.first < b.first; });
+    
+    // Keep only the closest neighbors
+    std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>> closest_neighbors;
+    int num_neighbors = std::min(max_num_neighbors, (int)neighbor_candidates.size());
+    for (int i = 0; i < num_neighbors; i++)
+    {
+        closest_neighbors.push_back(neighbor_candidates[i].second);
+    }
+    
+    return closest_neighbors;
 }
 
 void lioOptimization::standardCloudHandler(const sensor_msgs::PointCloud2::ConstPtr &msg) 
@@ -611,6 +671,9 @@ optimizeSummary lioOptimization::stateEstimation(cloudFrame *p_frame)
 
     optimizeSummary optimize_summary;
 
+    // Build local map from recent frames for odometry-only mode
+    buildLocalMap();
+
     if(p_frame->frame_id > sweep_cut_num)
     {
         bool good_enough_registration = false;
@@ -635,12 +698,10 @@ optimizeSummary lioOptimization::stateEstimation(cloudFrame *p_frame)
         G_norm = G.norm();
     }
 
-    addPointsToMap(voxel_map, p_frame, kSizeVoxelMap, kMaxNumPointsInVoxel, kMinDistancePoints);
-
-    const double kMaxDistance = options.max_distance;
-    const Eigen::Vector3d location = p_frame->p_state->translation;
-
-    removePointsFarFromLocation(voxel_map, location, kMaxDistance);
+    // Odometry-only mode: do not accumulate points in global map
+    // Commented out to prevent RAM accumulation:
+    // addPointsToMap(voxel_map, p_frame, kSizeVoxelMap, kMaxNumPointsInVoxel, kMinDistancePoints);
+    // removePointsFarFromLocation(voxel_map, location, kMaxDistance);
 
     return optimize_summary;
 }

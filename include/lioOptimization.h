@@ -201,6 +201,11 @@ private:
 
     voxelHashMap voxel_map;
 
+    // Local sliding window for odometry-only mode
+    std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>> local_map_points;
+    int local_map_frame_count = 5;  // Number of recent frames to keep in local map
+    bool use_global_map = false;     // Set to false for odometry-only mode
+
     odometryOptions options;
 
     geometry_msgs::Quaternion geoQuat;
@@ -251,7 +256,7 @@ public:
 
     optimizeSummary optimize(cloudFrame *p_frame, const icpOptions &cur_icp_options, double sample_voxel_size);
 
-    optimizeSummary buildPlaneResiduals(const icpOptions &cur_icp_options, const voxelHashMap &voxel_map_temp, std::vector<point3D> &keypoints, std::vector<planeParam> &plane_residuals, cloudFrame *p_frame, double &loss_sum);
+    optimizeSummary buildPlaneResiduals(const icpOptions &cur_icp_options, const voxelHashMap &voxel_map_temp, std::vector<point3D> &keypoints, std::vector<planeParam> &plane_residuals, cloudFrame *p_frame, double &loss_sum, bool use_local_map = false);
 
     optimizeSummary updateIEKF(const icpOptions &cur_icp_options, const voxelHashMap &voxel_map_temp, std::vector<point3D> &keypoints, cloudFrame *p_frame);
 
@@ -259,6 +264,14 @@ public:
 
     std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>> searchNeighbors(const voxelHashMap &map, const Eigen::Vector3d &point,
         int nb_voxels_visited, double size_voxel_map, int max_num_neighbors, int threshold_voxel_capacity = 1, std::vector<voxel> *voxels = nullptr);
+
+    // Local map methods for odometry-only mode
+    std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>> searchNeighborsLocal(const Eigen::Vector3d &point,
+        int max_num_neighbors, double max_distance);
+
+    void buildLocalMap();
+
+    void clearLocalMap();
     // data handle and state estimation
 
     // map update
