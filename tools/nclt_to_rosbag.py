@@ -7,6 +7,7 @@
 #   python sensordata_to_rosbag.py 2012-01-08/ 2012-01-08.bag
 #
 
+from pathlib import Path
 import os
 # import tf
 import math 
@@ -26,6 +27,16 @@ import struct
 from scipy.spatial.transform import Rotation as R
 
 num_hits = 1024
+
+velodyne_data_dir = Path("velodyne_data/")
+sensor_data = Path("sensor_data/")
+data_date = Path("2012-01-08/")
+
+input_dir = Path(sys.argv[1])
+output_bag = Path(sys.argv[2])
+
+sensor_path = input_dir / sensor_data / data_date
+velodyne_path = input_dir / velodyne_data_dir / data_date
 
 # q_extR = Quaternion.from_euler(0.0, 0.0, 3.1415926/2.0)
 # q_extR_T =  Quaternion.from_euler(0.0, 0.0, -3.1415926/2.0)
@@ -128,9 +139,7 @@ def write_ms25(ms25, ms25_euler, i, bag):
     print(len(ms25_euler))
     data_lenth = len(ms25) if len(ms25) <= len(ms25_euler) else len(ms25_euler)
 
-    i = 0
-
-    while i < data_lenth :
+    for i in tqdm(range(data_lenth)) :
         utime = ms25[i, 0]
 
         # mag_x = ms25[i, 1]
@@ -154,7 +163,7 @@ def write_ms25(ms25, ms25_euler, i, bag):
             p = (ms25_euler[i, 2] + ms25_euler[i, 2]) * 0.5
             h = (ms25_euler[i, 3] + ms25_euler[i, 3]) * 0.5
 
-            r_q = R.r = R.from_euler('xyz', [h, p, r], degrees=0)
+            r_q = R.from_euler('xyz', [h, p, r], degrees=False)
             r_lid = r_extR * r_q * r_extR_T
             q_lid = r_lid.as_quat()
             timestamp = rospy.Time.from_sec((utime + utime_last) / 2e6)
@@ -186,7 +195,7 @@ def write_ms25(ms25, ms25_euler, i, bag):
         p = ms25_euler[i, 2]
         h = ms25_euler[i, 3]
 
-        r_q = R.r = R.from_euler('xyz', [h, p, r], degrees=0)
+        r_q = R.from_euler('xyz', [h, p, r], degrees=False)
         r_lid = r_extR * r_q * r_extR_T
         q_lid = r_lid.as_quat()
         
@@ -207,7 +216,6 @@ def write_ms25(ms25, ms25_euler, i, bag):
         bag.write('imu_raw', imu, imu.header.stamp)
 
         utime_last = utime
-        i += 1
     
 
 def write_ms25_euler(ms25_euler, i, bag):
@@ -273,7 +281,7 @@ def read_first_vel_packet(f_vel, bag):
     return utime
     
 def write_vel(f_vel,bag):
-    size = os.path.getsize(sys.argv[1] + "velodyne_hits.bin")
+    size = os.path.getsize(velodyne_path / "velodyne_hits.bin")
     print(size/28/32)
     pbar = tqdm(total=size)
     num_hits = 384
@@ -393,19 +401,19 @@ def main(args):
         print('Please specify output rosbag file')
         return 1
 
-    bag = rosbag.Bag(sys.argv[2], 'w')
+    bag = rosbag.Bag(output_bag, 'w')
 
-    gps = np.loadtxt(sys.argv[1] + "gps.csv", delimiter = ",")
-    gps_rtk = np.loadtxt(sys.argv[1] + "gps_rtk.csv", delimiter = ",")
-    ms25 = np.loadtxt(sys.argv[1] + "ms25.csv", delimiter = ",")
-    ms25_euler = np.loadtxt(sys.argv[1] + "ms25_euler.csv", delimiter = ",")
+    gps = np.loadtxt(sensor_path / "gps.csv", delimiter = ",")
+    gps_rtk = np.loadtxt(sensor_path / "gps_rtk.csv", delimiter = ",")
+    ms25 = np.loadtxt(sensor_path / "ms25.csv", delimiter = ",")
+    ms25_euler = np.loadtxt(sensor_path / "ms25_euler.csv", delimiter = ",")
 
     i_gps = 0
     i_gps_rtk = 0
     i_ms25 = 0
     i_ms25_euler = 0
 
-    f_vel = open(sys.argv[1] + "velodyne_hits.bin", "rb")
+    f_vel = open(velodyne_path / "velodyne_hits.bin", "rb")
 
     # time_last = read_first_vel_packet(f_vel, bag)
     # data = []
