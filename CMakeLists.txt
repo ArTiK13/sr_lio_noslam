@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(sr_lio)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -O3")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14 -O3")
 
 find_package(catkin REQUIRED COMPONENTS
   eigen_conversions
@@ -19,6 +19,11 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   tf
 )
+
+find_package(CUDAToolkit REQUIRED)
+message(STATUS "CUDA found: ${CUDAToolkit_FOUND}")
+message(STATUS "CUDA version: ${CUDAToolkit_VERSION}")
+message(STATUS "CUDA include dirs: ${CUDAToolkit_INCLUDE_DIRS}")
 
 include(FetchContent)
 

@@ -60,7 +60,7 @@ lioOptimization::lioOptimization()
 
     pub_cloud_body = nh.advertise<sensor_msgs::PointCloud2>("/cloud_registered_current", 2);
     pub_cloud_world = nh.advertise<sensor_msgs::PointCloud2>("/cloud_global_map", 2);
-    pub_odom = nh.advertise<nav_msgs::Odometry>("/Odometry_after_opt", 5);
+    pub_odom = nh.advertise<nav_msgs::Odometry>("/Odometry_after_opt", 1);
     pub_path = nh.advertise<nav_msgs::Path>("/path", 5);
 
     sub_cloud_ori = nh.subscribe<sensor_msgs::PointCloud2>(lidar_topic, 20, &lioOptimization::standardCloudHandler, this);
@@ -331,6 +331,12 @@ std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>> lioOptim
 void lioOptimization::standardCloudHandler(const sensor_msgs::PointCloud2::ConstPtr &msg) 
 {
     assert(msg->header.stamp.toSec() > last_time_lidar);
+    // Skip old messages
+    if (ros::Time::now().toSec() - msg->header.stamp.toSec() > 0.5)
+    {
+        std::cout << "Skip old cloud message" << std::endl;
+        return;
+    }
     
     std::vector<std::vector<point3D>> v_cut_sweep;
     std::vector<double> v_dt_offset;
@@ -350,6 +356,12 @@ void lioOptimization::standardCloudHandler(const sensor_msgs::PointCloud2::Const
 
 void lioOptimization::imuHandler(const sensor_msgs::Imu::ConstPtr &msg)
 {
+    // Skip old messages
+    if (ros::Time::now().toSec() - msg->header.stamp.toSec() > 0.5)
+    {
+        std::cout << "Skip old IMU message" << std::endl;
+        return;
+    }
     sensor_msgs::Imu::Ptr msg_temp(new sensor_msgs::Imu(*msg));
 
     if (abs(time_diff) > 0.1 && time_diff_enable)
@@ -708,6 +720,12 @@ optimizeSummary lioOptimization::stateEstimation(cloudFrame *p_frame)
 
 void lioOptimization::process(std::vector<point3D> &cut_sweep, double timestamp_begin, double timestamp_offset)
 {
+    if (ros::Time::now().toSec() - (timestamp_begin + timestamp_offset) > 0.5)
+    {
+        std::cout << "Skip old data during process" << std::endl;
+        return;
+    }
+
     state *cur_state = new state();
 
     stateInitialization(cur_state);
