@@ -1,5 +1,7 @@
 #include "lioOptimization.h"
 #include <algorithm>  // For std::sort
+#include <chrono>
+#include <ratio>
 
 cloudFrame::cloudFrame(std::vector<point3D> &point_frame_, state *p_state_)
 {
@@ -63,8 +65,8 @@ lioOptimization::lioOptimization()
     pub_odom = nh.advertise<nav_msgs::Odometry>("/Odometry_after_opt", 1);
     pub_path = nh.advertise<nav_msgs::Path>("/path", 5);
 
-    sub_cloud_ori = nh.subscribe<sensor_msgs::PointCloud2>(lidar_topic, 20, &lioOptimization::standardCloudHandler, this);
-    sub_imu_ori = nh.subscribe<sensor_msgs::Imu>(imu_topic, 500, &lioOptimization::imuHandler, this);
+    sub_cloud_ori = nh.subscribe<sensor_msgs::PointCloud2>(lidar_topic, 3, &lioOptimization::standardCloudHandler, this);
+    sub_imu_ori = nh.subscribe<sensor_msgs::Imu>(imu_topic, 10, &lioOptimization::imuHandler, this);
 
     path.header.stamp = ros::Time::now();
     path.header.frame_id ="camera_init";
@@ -334,9 +336,10 @@ void lioOptimization::standardCloudHandler(const sensor_msgs::PointCloud2::Const
     // Skip old messages
     if (ros::Time::now().toSec() - msg->header.stamp.toSec() > 0.5)
     {
-        std::cout << "Skip old cloud message" << std::endl;
+        std::cout << "Skip old cloud message: dt is " << ros::Time::now().toSec() - msg->header.stamp.toSec() << std::endl;
         return;
     }
+    std::cout << "Add cloud message at time " << std::fixed << std::setprecision(3) << ros::Time::now().toSec() << std::endl;
     
     std::vector<std::vector<point3D>> v_cut_sweep;
     std::vector<double> v_dt_offset;
@@ -362,6 +365,7 @@ void lioOptimization::imuHandler(const sensor_msgs::Imu::ConstPtr &msg)
         std::cout << "Skip old IMU message" << std::endl;
         return;
     }
+    // std::cout << "Add IMU message at time " << std::fixed << std::setprecision(3) << ros::Time::now().toSec() << std::endl;
     sensor_msgs::Imu::Ptr msg_temp(new sensor_msgs::Imu(*msg));
 
     if (abs(time_diff) > 0.1 && time_diff_enable)
@@ -383,14 +387,21 @@ std::vector<std::pair<std::pair<std::vector<sensor_msgs::ImuConstPtr>, std::vect
 
     while (true)
     {
-        if(imu_buffer.size() < (60 / sweep_cut_num) || lidar_buffer.size() < 2 || time_buffer.size() < 2)
-            return measurements;
-
-        if (!(imu_buffer.back()->header.stamp.toSec() > time_buffer.front().first + time_buffer.front().second))
+        if(imu_buffer.size() < (30 / sweep_cut_num) || lidar_buffer.size() < 2 || time_buffer.size() < 2)
         {
+            std::cout << "Return measurements 1" << std::endl;
             return measurements;
         }
 
+        if (!(imu_buffer.back()->header.stamp.toSec() > time_buffer.front().first + time_buffer.front().second))
+        {
+            std::cout << "Return measurements 2" << std::endl;
+            return measurements;
+        }
+        
+        std::cout << "IMU buffer size at start: " << imu_buffer.size() << std::endl;
+        std::cout << "Oldest IMU message in buffer: " << std::fixed << std::setprecision(3) << imu_buffer.front()->header.stamp.toSec() << std::endl;
+        std::cout << "Newest IMU message in buffer: " << std::fixed << std::setprecision(3) << imu_buffer.back()->header.stamp.toSec() << std::endl;
         if (!(imu_buffer.front()->header.stamp.toSec() < time_buffer.front().first + time_buffer.front().second))
         {
             time_buffer.pop();
@@ -442,6 +453,7 @@ std::vector<std::pair<std::pair<std::vector<sensor_msgs::ImuConstPtr>, std::vect
 
         break;
     }
+    std::cout << "IMU buffer size at end: " << imu_buffer.size() << std::endl;
     return measurements;
 }
 
@@ -519,28 +531,35 @@ cloudFrame* lioOptimization::buildFrame(std::vector<point3D> &cut_sweep, state *
 
     double dt_offset = 0;
 
-    if(sweep_cut_num == 1)
-    {   
-        if(index_frame > sweep_cut_num)
-            dt_offset -= time_frame_begin - all_cloud_frame.back()->time_sweep_end;
-    }
-    else
-    {
-        int i = all_cloud_frame.size() - 1;
+    std::cout << "All cloud frame size: " << all_cloud_frame.size() << std::endl;
+    std::cout << reconstructed_sweep.size() << std::endl;
+    std::cout << "Index frame: " << index_frame << std::endl;
 
-        while(i >= 0 && all_cloud_frame[i]->sub_id != 0)
+    if (all_cloud_frame.size() > 0)
+    {
+        if (sweep_cut_num == 1)
         {
-            dt_offset += dt_sum;
-            i--;
+            if(index_frame > sweep_cut_num)
+                dt_offset -= time_frame_begin - all_cloud_frame.back()->time_sweep_end;
+        }
+        else
+        {
+            int i = all_cloud_frame.size() - 1;
+
+            while(i >= 0 && all_cloud_frame[i]->sub_id != 0)
+            {
+                dt_offset += dt_sum;
+                i--;
+            }
+
+            if(index_frame > sweep_cut_num)
+                dt_offset -= (i == all_cloud_frame.size() - 1 ?  time_frame_begin : all_cloud_frame[i + 1]->time_frame_begin) - all_cloud_frame[i]->time_frame_end;
         }
 
-        if(index_frame > sweep_cut_num)
-            dt_offset -= (i == all_cloud_frame.size() - 1 ?  time_frame_begin : all_cloud_frame[i + 1]->time_frame_begin) - all_cloud_frame[i]->time_frame_end;
-    }
-
-    if (index_frame <= sweep_cut_num + 1) {
-        for (auto &point_temp: reconstructed_sweep) {
-            point_temp.alpha_time = 1.0;
+        if (index_frame <= sweep_cut_num + 1) {
+            for (auto &point_temp: reconstructed_sweep) {
+                point_temp.alpha_time = 1.0;
+            }
         }
     }
 
@@ -674,6 +693,7 @@ void lioOptimization::stateInitialization(state *cur_state)
 
 optimizeSummary lioOptimization::stateEstimation(cloudFrame *p_frame)
 {
+    // std::cout << "se1" << std::endl;
     icpOptions optimize_options = options.optimize_options;
     const double kSizeVoxelInitSample = options.voxel_size;
 
@@ -686,13 +706,18 @@ optimizeSummary lioOptimization::stateEstimation(cloudFrame *p_frame)
     // Build local map from recent frames for odometry-only mode
     buildLocalMap();
 
+    // std::cout << "se2" << std::endl;
+
     if(p_frame->frame_id > sweep_cut_num)
     {
+        // std::cout << "if" << std::endl;
         bool good_enough_registration = false;
         double sample_voxel_size = p_frame->frame_id < options.init_num_frames ? options.init_sample_voxel_size : options.sample_voxel_size;
         double min_voxel_size = std::min(options.init_voxel_size, options.voxel_size);
 
+        // std::cout << "before optimize" << std::endl;
         optimize_summary = optimize(p_frame, optimize_options, sample_voxel_size);
+        // std::cout << "after optimize" << std::endl;
 
         if(!optimize_summary.success)
         {
@@ -701,6 +726,7 @@ optimizeSummary lioOptimization::stateEstimation(cloudFrame *p_frame)
     }
     else
     {
+        // std::cout << "else" << std::endl;
         p_frame->p_state->translation = eskf_pro->getTranslation();
         p_frame->p_state->rotation = eskf_pro->getRotation();
         p_frame->p_state->velocity = eskf_pro->getVelocity();
@@ -709,6 +735,8 @@ optimizeSummary lioOptimization::stateEstimation(cloudFrame *p_frame)
         G = eskf_pro->getGravity();
         G_norm = G.norm();
     }
+
+    std::cout << "se3" << std::endl;
 
     // Odometry-only mode: do not accumulate points in global map
     // Commented out to prevent RAM accumulation:
@@ -720,11 +748,13 @@ optimizeSummary lioOptimization::stateEstimation(cloudFrame *p_frame)
 
 void lioOptimization::process(std::vector<point3D> &cut_sweep, double timestamp_begin, double timestamp_offset)
 {
+    auto start_time = std::chrono::high_resolution_clock::now();
     if (ros::Time::now().toSec() - (timestamp_begin + timestamp_offset) > 0.5)
     {
-        std::cout << "Skip old data during process" << std::endl;
+        std::cout << "Skip old data during process: dt is " << ros::Time::now().toSec() - (timestamp_begin + timestamp_offset) << std::endl;
         return;
     }
+    std::cout << std::fixed << std::setprecision(3) << "Start processing at time " << ros::Time::now().toSec() << std::endl;
 
     state *cur_state = new state();
 
@@ -796,6 +826,10 @@ void lioOptimization::process(std::vector<point3D> &cut_sweep, double timestamp_
         assert(v_cut_sweep.front().size() == 0);
         v_cut_sweep.erase(v_cut_sweep.begin());
     }
+
+    const auto end_time = std::chrono::high_resolution_clock::now();
+    const std::chrono::duration<double> time_to_process = end_time - start_time;
+    std::cout << "\n\n Time to process: " << time_to_process.count() << "\n\n" << std::endl;
 }
 
 void lioOptimization::recordSinglePose(cloudFrame *p_frame)
@@ -918,6 +952,8 @@ void lioOptimization::publish_odometry(const ros::Publisher & pubOdomAftMapped, 
 
 void lioOptimization::run()
 {
+    // std::cout << "\n\n run \n\n" << std::endl;
+    auto t_start = std::chrono::high_resolution_clock::now();
     std::vector<std::pair<std::pair<std::vector<sensor_msgs::ImuConstPtr>, std::vector<point3D>>, std::pair<double, double>>> measurements = getMeasurements();
 
     if(measurements.size() == 0) return;
@@ -927,6 +963,7 @@ void lioOptimization::run()
         auto cut_sweep = measurement.first.second;
 
         double time_frame = measurement.second.first + measurement.second.second;
+        std::cout << "Measurement oldness: " << ros::Time::now().toSec() - time_frame << std::endl;
         double dx = 0, dy = 0, dz = 0, rx = 0, ry = 0, rz = 0;
 
         if (!initial_flag)
@@ -1075,6 +1112,9 @@ void lioOptimization::run()
 
         std::vector<point3D>().swap(measurement.first.second);
     }
+    const auto t_end = std::chrono::high_resolution_clock::now();
+    auto time_to_process = std::chrono::duration<double>(t_end - t_start);
+    std::cout << "Whole iteration time: " << time_to_process.count() << std::endl;
 }
 
 

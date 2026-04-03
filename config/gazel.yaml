@@ -2,7 +2,7 @@ common:
     lidar_topic:  "/ouster_top/points"
     imu_topic:  "/ouster_top/imu"
     point_filter_num: 4
-    sweep_cut_num: 2
+    sweep_cut_num: 1
     time_sync_en: false         # ONLY turn on when external time synchronization is really not possible
     gravity_acc: [ -2.0, 0.0, 10.0 ]
     
