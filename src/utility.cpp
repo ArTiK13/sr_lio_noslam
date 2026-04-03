@@ -205,6 +205,7 @@ void distortFrameByConstant(std::vector<point3D> &points, std::vector<imuState> 
     double time_frame_end, time_point;
 
     time_frame_end = imu_states.back().timestamp;
+    const double frame_duration = time_frame_end - time_frame_begin;
 
     Eigen::Quaterniond quat_begin = imu_states.front().quat;
     Eigen::Quaterniond quat_end = imu_states.back().quat;
@@ -212,18 +213,45 @@ void distortFrameByConstant(std::vector<point3D> &points, std::vector<imuState> 
     Eigen::Vector3d trans_begin = imu_states.front().trans;
     Eigen::Vector3d trans_end = imu_states.back().trans;
 
+    if (frame_duration <= 1e-9)
+    {
+        ROS_WARN_STREAM_THROTTLE(1.0, "Skip constant-velocity distortion due to non-positive frame duration. begin="
+                                 << time_frame_begin << ", end=" << time_frame_end);
+
+        for (auto &point : points)
+        {
+            point.imu_point = quat_begin.toRotationMatrix() * (R_imu_lidar * point.raw_point + t_imu_lidar) + trans_begin;
+        }
+
+        return;
+    }
+
     std::vector<point3D>::iterator iter = points.begin();
 
     while (iter != points.end())
     {
         time_point = time_frame_begin + (*iter).relative_time / 1000.0;
-        assert(time_point > time_frame_begin - 1e-6 && time_point < time_frame_end + 1e-6);
+
+        if (time_point <= time_frame_begin - 1e-6 || time_point >= time_frame_end + 1e-6)
+        {
+            ROS_WARN_STREAM_THROTTLE(1.0, "Discard point outside frame interval during constant-velocity distortion. begin="
+                                     << time_frame_begin << ", end=" << time_frame_end << ", point=" << time_point);
+            iter = points.erase(iter);
+            continue;
+        }
 
         if (fabs(time_point - time_frame_begin) < 1e-6) time_point = time_frame_begin + 1e-6;
         if (fabs(time_point - time_frame_end) < 1e-6) time_point = time_frame_end - 1e-6;
 
-        double alpha_time = (time_point - time_frame_begin) / (time_frame_end - time_frame_begin);
-        assert(alpha_time >= 0 && alpha_time <= 1);
+        double alpha_time = (time_point - time_frame_begin) / frame_duration;
+        if (!std::isfinite(alpha_time) || alpha_time < 0.0 || alpha_time > 1.0)
+        {
+            ROS_WARN_STREAM_THROTTLE(1.0, "Discard point with invalid interpolation factor during constant-velocity distortion. alpha="
+                                     << alpha_time << ", begin=" << time_frame_begin << ", end=" << time_frame_end
+                                     << ", point=" << time_point);
+            iter = points.erase(iter);
+            continue;
+        }
 
         Eigen::Quaterniond quat_alpha = quat_begin.slerp(alpha_time, quat_end);
         Eigen::Vector3d trans_alpha = (1.0 - alpha_time) * trans_begin + alpha_time * trans_end;
