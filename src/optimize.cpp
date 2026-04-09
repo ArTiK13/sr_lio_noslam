@@ -103,7 +103,7 @@ optimizeSummary lioOptimization::buildPlaneResiduals(const icpOptions &cur_icp_o
         plane_temp.distance = plane_temp.norm_vector.dot(end_quat.toRotationMatrix() * plane_temp.raw_point + end_t) + plane_temp.norm_offset;
         plane_temp.weight = weight;
 
-        if (plane_temp.distance < cur_icp_options.max_dist_to_plane_icp) {
+        if (std::abs(plane_temp.distance) < cur_icp_options.max_dist_to_plane_icp) {
             num_residuals++;
             plane_temp.jacobians.block<1, 3>(0, 0) = plane_temp.norm_vector.transpose() * weight;
             plane_temp.jacobians.block<1, 3>(0, 3) = - plane_temp.norm_vector.transpose() * end_quat.toRotationMatrix() * numType::skewSymmetric(plane_temp.raw_point) * weight;

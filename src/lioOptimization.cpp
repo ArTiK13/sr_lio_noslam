@@ -144,7 +144,10 @@ void lioOptimization::readParameters()
     nh.param<double>("icp_options/power_planarity", options.optimize_options.power_planarity, 2.0);
     nh.param<bool>("icp_options/estimate_normal_from_neighborhood", options.optimize_options.estimate_normal_from_neighborhood, true);
     nh.param<int>("icp_options/max_number_neighbors", options.optimize_options.max_number_neighbors, 20);
-    nh.param<double>("icp_options/max_dist_to_plane_icp", options.optimize_options.max_dist_to_plane_icp, 0.3);
+    if (!nh.getParam("icp_options/max_dist_to_plane_icp", options.optimize_options.max_dist_to_plane_icp))
+    {
+        nh.param<double>("icp_options/max_dist_to_plane_ct_icp", options.optimize_options.max_dist_to_plane_icp, 0.3);
+    }
     nh.param<double>("icp_options/threshold_orientation_norm", options.optimize_options.threshold_orientation_norm, 0.0001);
     nh.param<double>("icp_options/threshold_translation_norm", options.optimize_options.threshold_translation_norm, 0.001);
     nh.param<int>("icp_options/max_num_residuals", options.optimize_options.max_num_residuals, -1);
