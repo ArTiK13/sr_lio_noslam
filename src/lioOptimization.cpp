@@ -67,6 +67,7 @@ lioOptimization::lioOptimization()
 
     sub_cloud_ori = nh.subscribe<sensor_msgs::PointCloud2>(lidar_topic, 3, &lioOptimization::standardCloudHandler, this);
     sub_imu_ori = nh.subscribe<sensor_msgs::Imu>(imu_topic, 10, &lioOptimization::imuHandler, this);
+    sub_speed = nh.subscribe<geometry_msgs::Vector3Stamped>(speed_topic, 10, &lioOptimization::speedHandler, this);
 
     path.header.stamp = ros::Time::now();
     path.header.frame_id ="camera_init";
@@ -85,6 +86,7 @@ void lioOptimization::readParameters()
     // common
     nh.param<std::string>("common/lidar_topic", lidar_topic, "/points_raw");
 	nh.param<std::string>("common/imu_topic", imu_topic, "/imu_raw");
+    nh.param<std::string>("common/speed_topic", speed_topic, "/speed");
     nh.param<int>("common/point_filter_num", para_int, 1);  cloud_pro->setPointFilterNum(para_int);
     nh.param<int>("common/sweep_cut_num", sweep_cut_num, 3); cloud_pro->setSweepCutNum(sweep_cut_num);
     nh.param<std::vector<double>>("common/gravity_acc", v_G, std::vector<double>());
@@ -191,8 +193,12 @@ void lioOptimization::initialValue()
 
     last_time_lidar = -1.0;
     last_time_imu = -1.0;
+    last_time_speed = -1.0;
     last_time_frame = -1.0;
     current_time = -1.0;
+    last_valid_speed_stamp = -1.0;
+    last_valid_speed_x = 0.0;
+    has_valid_speed = false;
 
     index_frame = 1;
 
@@ -386,6 +392,101 @@ void lioOptimization::imuHandler(const sensor_msgs::Imu::ConstPtr &msg)
 
     assert(msg_temp->header.stamp.toSec() > last_time_imu);
     last_time_imu = msg_temp->header.stamp.toSec();
+}
+
+void lioOptimization::speedHandler(const geometry_msgs::Vector3Stamped::ConstPtr &msg)
+{
+    const double stamp = msg->header.stamp.toSec();
+
+    if (stamp <= last_time_speed)
+    {
+        ROS_WARN_STREAM("Drop out-of-order speed message at " << std::fixed << std::setprecision(3) << stamp);
+        return;
+    }
+
+    speed_buffer.push(msg);
+    last_time_speed = stamp;
+}
+
+bool lioOptimization::resolveSpeedSampleForFrame(double frame_end_time, double &speed_x, double &speed_stamp)
+{
+    while (!speed_buffer.empty() && speed_buffer.front()->header.stamp.toSec() <= frame_end_time)
+    {
+        last_valid_speed_stamp = speed_buffer.front()->header.stamp.toSec();
+        last_valid_speed_x = speed_buffer.front()->vector.x;
+        has_valid_speed = true;
+        speed_buffer.pop();
+    }
+
+    if (!has_valid_speed)
+    {
+        return false;
+    }
+
+    speed_stamp = last_valid_speed_stamp;
+    speed_x = last_valid_speed_x;
+
+    if (frame_end_time - speed_stamp > 0.2)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool lioOptimization::applySpeedFallback(cloudFrame *p_frame)
+{
+    if (p_frame == nullptr || p_frame->p_state == nullptr)
+    {
+        return false;
+    }
+
+    const Eigen::Vector3d predicted_translation = eskf_pro->getTranslation();
+    const Eigen::Quaterniond predicted_rotation = eskf_pro->getRotation();
+    const Eigen::Vector3d predicted_velocity = eskf_pro->getVelocity();
+    const Eigen::Vector3d predicted_ba = eskf_pro->getBa();
+    const Eigen::Vector3d predicted_bg = eskf_pro->getBg();
+
+    p_frame->p_state->translation = predicted_translation;
+    p_frame->p_state->rotation = predicted_rotation;
+    p_frame->p_state->velocity = predicted_velocity;
+    p_frame->p_state->ba = predicted_ba;
+    p_frame->p_state->bg = predicted_bg;
+
+    Eigen::Vector3d final_translation = predicted_translation;
+    Eigen::Vector3d final_velocity = predicted_velocity;
+
+    double speed_x = 0.0;
+    double speed_stamp = -1.0;
+    const bool has_speed = resolveSpeedSampleForFrame(p_frame->time_frame_end, speed_x, speed_stamp);
+
+    if (has_speed)
+    {
+        const Eigen::Vector3d world_vel = predicted_rotation.toRotationMatrix() * Eigen::Vector3d(speed_x, 0.0, 0.0);
+        final_velocity = world_vel;
+        eskf_pro->setTranslation(final_translation);
+        eskf_pro->setVelocity(final_velocity);
+    }
+    else
+    {
+        eskf_pro->setTranslation(final_translation);
+        eskf_pro->setVelocity(final_velocity);
+    }
+
+    p_frame->p_state->translation = final_translation;
+    p_frame->p_state->rotation = predicted_rotation;
+    p_frame->p_state->velocity = final_velocity;
+    p_frame->p_state->ba = predicted_ba;
+    p_frame->p_state->bg = predicted_bg;
+
+    Eigen::Quaterniond final_rotation = p_frame->p_state->rotation;
+    Eigen::Vector3d final_translation_copy = p_frame->p_state->translation;
+    for (auto &point_temp: p_frame->point_frame)
+    {
+        transformPoint(point_temp, final_rotation, final_translation_copy, R_imu_lidar, t_imu_lidar);
+    }
+
+    return has_speed;
 }
 
 std::vector<std::pair<std::pair<std::vector<sensor_msgs::ImuConstPtr>, std::vector<point3D>>, std::pair<double, double>>> lioOptimization::getMeasurements()
@@ -734,6 +835,7 @@ optimizeSummary lioOptimization::stateEstimation(cloudFrame *p_frame)
     else
     {
         // std::cout << "else" << std::endl;
+        optimize_summary.success = true;
         p_frame->p_state->translation = eskf_pro->getTranslation();
         p_frame->p_state->rotation = eskf_pro->getRotation();
         p_frame->p_state->velocity = eskf_pro->getVelocity();
@@ -774,6 +876,19 @@ void lioOptimization::process(std::vector<point3D> &cut_sweep, double timestamp_
     cloudFrame *p_frame = buildFrame(const_frame, cur_state, timestamp_begin, timestamp_offset);
 
     optimizeSummary summary = stateEstimation(p_frame);
+
+    if (!summary.success)
+    {
+        const bool fallback_applied = applySpeedFallback(p_frame);
+        if (fallback_applied)
+        {
+            ROS_INFO_STREAM("Applied speed fallback for frame " << p_frame->frame_id);
+        }
+        else
+        {
+            ROS_WARN_STREAM_THROTTLE(1.0, "Skipped speed fallback: no valid /speed sample");
+        }
+    }
 
     std::cout << "after solution: " << std::endl;
     std::cout << "rotation: " << p_frame->p_state->rotation.x() << " " << p_frame->p_state->rotation.y() << " " 

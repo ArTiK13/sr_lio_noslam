@@ -14,6 +14,7 @@
 #include <tf/transform_datatypes.h>
 #include <tf/transform_broadcaster.h>
 #include <geometry_msgs/Vector3.h>
+#include <geometry_msgs/Vector3Stamped.h>
 #include <sensor_msgs/Imu.h>
 #include <sensor_msgs/PointCloud2.h>
 
@@ -151,9 +152,11 @@ private:
 
     ros::Subscriber sub_cloud_ori;   // the data of original point clouds from LiDAR sensor
     ros::Subscriber sub_imu_ori;			// the data of original accelerometer and gyroscope from IMU sensor
+    ros::Subscriber sub_speed;
 
     std::string lidar_topic;
     std::string imu_topic;
+    std::string speed_topic;
 
 	cloudProcessing *cloud_pro;
     eskfEstimator *eskf_pro;
@@ -176,6 +179,7 @@ private:
 
     std::queue<std::vector<point3D>> lidar_buffer;
     std::queue<sensor_msgs::Imu::ConstPtr> imu_buffer;
+    std::queue<geometry_msgs::Vector3Stamped::ConstPtr> speed_buffer;
 
     std::vector<cloudFrame*> all_cloud_frame;
 
@@ -186,8 +190,13 @@ private:
 
 	double last_time_lidar;
 	double last_time_imu;
+    double last_time_speed;
     double last_time_frame;
     double current_time;
+    double last_valid_speed_stamp;
+    double last_valid_speed_x;
+
+    bool has_valid_speed;
 
     int sweep_cut_num;
     int index_frame;
@@ -235,6 +244,8 @@ public:
     void standardCloudHandler(const sensor_msgs::PointCloud2::ConstPtr &msg);
 
 	void imuHandler(const sensor_msgs::Imu::ConstPtr &msg);
+
+    void speedHandler(const geometry_msgs::Vector3Stamped::ConstPtr &msg);
     // get sensor data
 
     // main loop
@@ -251,6 +262,10 @@ public:
     void makePointTimestamp(std::vector<point3D> &sweep, double time_begin, double time_end);
 
     void stateInitialization(state *cur_state);
+
+    bool resolveSpeedSampleForFrame(double frame_end_time, double &speed_x, double &speed_stamp);
+
+    bool applySpeedFallback(cloudFrame *p_frame);
 
     optimizeSummary stateEstimation(cloudFrame *p_frame);
 
