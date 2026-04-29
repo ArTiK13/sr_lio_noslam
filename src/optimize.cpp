@@ -40,13 +40,13 @@ optimizeSummary lioOptimization::buildPlaneResiduals(const icpOptions &cur_icp_o
     };
 
     auto estimatePointNeighborhood = [&](std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>> &vector_neighbors,
-                                           Eigen::Vector3d &location, double &planarity_weight)
+                                           const Eigen::Vector3d &query_point_world, double &planarity_weight)
     {
 
         auto neighborhood = computeNeighborhoodDistribution(vector_neighbors);
         planarity_weight = std::pow(neighborhood.a2D, cur_icp_options.power_planarity);
 
-        if (neighborhood.normal.dot(last_state->translation - location) < 0) {
+        if (neighborhood.normal.dot(last_state->translation - query_point_world) < 0) {
             neighborhood.normal = -1.0 * neighborhood.normal;
         }
         return neighborhood;
@@ -90,7 +90,7 @@ optimizeSummary lioOptimization::buildPlaneResiduals(const icpOptions &cur_icp_o
 
         Eigen::Vector3d location = R_imu_lidar * raw_point + t_imu_lidar;
 
-        auto neighborhood = estimatePointNeighborhood(vector_neighbors, location, weight);
+        auto neighborhood = estimatePointNeighborhood(vector_neighbors, keypoint.point, weight);
 
         weight = lambda_weight * weight + lambda_neighborhood * std::exp(-(vector_neighbors[0] -
                  keypoint.point).norm() / (kMaxPointToPlane * kMinNumNeighbors));

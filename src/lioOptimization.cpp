@@ -122,7 +122,14 @@ void lioOptimization::readParameters()
     nh.param<double>("odometry_options/max_distance", options.max_distance, 100.0);
     nh.param<int>("odometry_options/max_num_points_in_voxel", options.max_num_points_in_voxel, 20);
     nh.param<double>("odometry_options/min_distance_points", options.min_distance_points, 0.1);
+    nh.param<int>("odometry_options/local_map_frame_count", local_map_frame_count, local_map_frame_count);
     nh.param<double>("odometry_options/distance_error_threshold", options.distance_error_threshold, 5.0);
+
+    if (local_map_frame_count < 1)
+    {
+        ROS_WARN_STREAM("odometry_options/local_map_frame_count must be >= 1. Clamping " << local_map_frame_count << " to 1.");
+        local_map_frame_count = 1;
+    }
 
     nh.param<std::string>("odometry_options/motion_compensation", str_temp, "CONSTANT_VELOCITY");
     if(str_temp == "IMU") options.motion_compensation = IMU;
@@ -278,18 +285,15 @@ size_t lioOptimization::mapSize(const voxelHashMap &map)
 void lioOptimization::buildLocalMap()
 {
     local_map_points.clear();
-    
-    // Get recent frames for local map
-    int num_frames = std::min(local_map_frame_count, (int)all_cloud_frame.size());
-    
-    for (int i = all_cloud_frame.size() - num_frames; i < all_cloud_frame.size(); i++)
+
+    const int available_previous_frames = std::max(0, static_cast<int>(all_cloud_frame.size()) - 1);
+    const int num_previous_frames = std::min(local_map_frame_count, available_previous_frames);
+
+    for (int i = available_previous_frames - num_previous_frames; i < available_previous_frames; i++)
     {
-        if (i < 0) continue;
-        
         cloudFrame* frame = all_cloud_frame[i];
-        if (frame == nullptr || frame == all_cloud_frame.back()) continue;
-        
-        // Add points from this frame to local map
+        if (frame == nullptr) continue;
+
         for (const auto &point : frame->point_frame)
         {
             local_map_points.push_back(point.point);
@@ -793,24 +797,27 @@ void lioOptimization::process(std::vector<point3D> &cut_sweep, double timestamp_
     }
 
     int num_remove = 0;
+    const int retained_frame_count = std::max(std::max(2, sweep_cut_num), local_map_frame_count);
 
     if (initial_flag)
     {
         if (index_frame > sweep_cut_num && index_frame % sweep_cut_num == 0)
         {
-            while (all_cloud_frame.size() > std::max(2, sweep_cut_num))
+            while (all_cloud_frame.size() > retained_frame_count)
             {
                 recordSinglePose(all_cloud_frame[0]);
                 all_cloud_frame[0]->release();
                 all_cloud_frame.erase(all_cloud_frame.begin());
                 num_remove++;
             }
-            assert(all_cloud_frame.size() == std::max(2, sweep_cut_num));
+            assert(all_cloud_frame.size() <= retained_frame_count);
         }
     }
     else
     {
-        while (all_cloud_frame.size() > options.num_for_initialization)
+        const int initialization_retained_frame_count = std::max(options.num_for_initialization, retained_frame_count);
+
+        while (all_cloud_frame.size() > initialization_retained_frame_count)
         {
             recordSinglePose(all_cloud_frame[0]);
             all_cloud_frame[0]->release();
