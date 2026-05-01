@@ -413,7 +413,7 @@ bool lioOptimization::resolveSpeedSampleForFrame(double frame_end_time, double &
     while (!speed_buffer.empty() && speed_buffer.front()->header.stamp.toSec() <= frame_end_time)
     {
         last_valid_speed_stamp = speed_buffer.front()->header.stamp.toSec();
-        last_valid_speed_x = speed_buffer.front()->vector.x;
+        last_valid_speed_x = speed_buffer.front()->vector.x / 3.6;
         has_valid_speed = true;
         speed_buffer.pop();
     }
@@ -883,10 +883,13 @@ void lioOptimization::process(std::vector<point3D> &cut_sweep, double timestamp_
         if (fallback_applied)
         {
             ROS_INFO_STREAM("Applied speed fallback for frame " << p_frame->frame_id);
+            ROS_INFO_STREAM("Fallback speed " << p_frame->p_state->velocity);
+            std::cout << "Fallback speed " << p_frame->p_state->velocity;
         }
         else
         {
             ROS_WARN_STREAM_THROTTLE(1.0, "Skipped speed fallback: no valid /speed sample");
+            std::cout << "NO fallback speed";
         }
     }
 
