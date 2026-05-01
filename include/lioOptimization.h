@@ -157,6 +157,7 @@ private:
     std::string lidar_topic;
     std::string imu_topic;
     std::string speed_topic;
+    std::string use_speed;
 
 	cloudProcessing *cloud_pro;
     eskfEstimator *eskf_pro;

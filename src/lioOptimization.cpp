@@ -87,11 +87,18 @@ void lioOptimization::readParameters()
     nh.param<std::string>("common/lidar_topic", lidar_topic, "/points_raw");
 	nh.param<std::string>("common/imu_topic", imu_topic, "/imu_raw");
     nh.param<std::string>("common/speed_topic", speed_topic, "/speed");
+    nh.param<std::string>("common/use_speed", use_speed, "fallback");
     nh.param<int>("common/point_filter_num", para_int, 1);  cloud_pro->setPointFilterNum(para_int);
     nh.param<int>("common/sweep_cut_num", sweep_cut_num, 3); cloud_pro->setSweepCutNum(sweep_cut_num);
     nh.param<std::vector<double>>("common/gravity_acc", v_G, std::vector<double>());
     nh.param<bool>("debug_output", debug_output, false);
     nh.param<std::string>("output_path", output_path, "");
+
+    if (use_speed != "no" && use_speed != "fallback" && use_speed != "always")
+    {
+        ROS_WARN_STREAM("common/use_speed 'no', 'fallback' or 'always'. Setting to 'fallback'.");
+        use_speed = "fallback";
+    }
 
     // LiDAR parameter
     nh.param<int>("lidar_parameter/lidar_type", para_int, AVIA);  cloud_pro->setLidarType(para_int);
@@ -877,7 +884,7 @@ void lioOptimization::process(std::vector<point3D> &cut_sweep, double timestamp_
 
     optimizeSummary summary = stateEstimation(p_frame);
 
-    if (!summary.success)
+    if ((!summary.success || use_speed == "always") && (use_speed != "no"))
     {
         const bool fallback_applied = applySpeedFallback(p_frame);
         if (fallback_applied)
